@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 """
 Compute posteriors probabilities of phonological classes from audio files for several groups of phonemes according to the mode and manner of articulation.
-
 @author: J. C. Vasquez-Correa
         Pattern recognition Lab, University of Erlangen-Nuremberg
         Faculty of Engineering, University of Antioquia,
@@ -15,10 +14,16 @@ from scipy.io.wavfile import read
 import pandas as pd
 import matplotlib.pyplot as plt
 plt.rcParams["font.family"] = "Times New Roman"
-
+from matplotlib.patches import Rectangle, Ellipse
+from mpl_toolkits.mplot3d import Axes3D  # noqa: F401 unused import
 from scipy.signal import resample_poly
-from tensorflow import keras
+
+from keras.layers import Input, BatchNormalization, Bidirectional, GRU, Permute, Dropout, Dense, TimeDistributed
+from keras.utils import np_utils
+from keras.models import Model
+from keras import optimizers
 import gc
+from keras import backend as K
 from matplotlib import cm
 try:
     from phonet.Phonological import Phonological
@@ -31,14 +36,11 @@ class Phonet:
 
     """
     Phonet computes posteriors probabilities of phonological classes from audio files for several groups of phonemes.
-
     :param phonological_classes: phonological class to be evaluated ("consonantal", "back", "anterior", "open", "close", "nasal", "stop",
                                                 "continuant",  "lateral", "flap", "trill", "voice", "strident",
                                                 "labial", "dental", "velar", "pause", "vocalic", "all").
     :returns: Phonet Object (see `Examples <https://github.com/jcvasquezc/phonet/blob/master/example.py>`_).
-
     phonological_classes=='all' computes the phonological posterior for the complete list of phonological classes. 
-
     """
 
     def __init__(self, phonological_classes):
@@ -55,7 +57,7 @@ class Phonet:
         self.nfilt=33
         self.len_seq=40
         self.names=self.Phon.get_list_phonological_keys()
-        self.num_labels=[2 for j in range(len(self.names))]
+        self.num_labels=num_labels=[2 for j in range(len(self.names))]
         self.nfeat=34
         self.thrplot=0.7
         self.nphonemes=len(self.phonemes)
@@ -68,6 +70,7 @@ class Phonet:
         self.MU, self.STD=self.load_scaler()
         
     def load_model(self):
+        Models=[]
         input_size=(self.len_seq, self.nfeat)
         model_file=self.path+"/models/model.h5"
         Model=self.model(input_size)
@@ -76,7 +79,6 @@ class Phonet:
 
     def mask_correction(self, posterior, threshold=0.5):
         """Implements a mask for a correction the posterior probabilities
-
         :param posterior: phonological posterior.
         :param threshold: threshold for correction
         :returns: Corrected phonological posterior.
@@ -109,19 +111,18 @@ class Phonet:
     def modelp(self, input_size):
         """This is the architecture used for phoneme recognition
         It consists of a 2 Bidirectional GRU layers, followed by a time-distributed dense layer
-
         :param input_size: size of input for the BGRU layers (number of features x sequence length).
         :returns: A Keras model of a 2-layer BGRU neural network.
         """
-        input_data=keras.layers.Input(shape=(input_size))
+        input_data=Input(shape=(input_size))
         x=input_data
-        x=keras.layers.BatchNormalization()(x)
-        x=keras.layers.Bidirectional(keras.layers.GRU(self.GRU_size, recurrent_dropout=self.recurrent_droput_prob, return_sequences=True, reset_after=False))(x)
-        x=keras.layers.Bidirectional(keras.layers.GRU(self.GRU_size, recurrent_dropout=self.recurrent_droput_prob, return_sequences=True, reset_after=False))(x)
-        x = keras.layers.TimeDistributed(keras.layers.Dense(self.hidden_size, activation='relu'))(x)
-        x = keras.layers.TimeDistributed(keras.layers.Dense(self.nphonemes, activation='softmax'))(x)
-        modelGRU=keras.Model(inputs=input_data, outputs=x)
-        opt=keras.optimizers.Adam(learning_rate=self.lr)
+        x=BatchNormalization()(x)
+        x=Bidirectional(GRU(self.GRU_size, recurrent_dropout=self.recurrent_droput_prob, return_sequences=True, reset_after=False))(x)
+        x=Bidirectional(GRU(self.GRU_size, recurrent_dropout=self.recurrent_droput_prob, return_sequences=True, reset_after=False))(x)
+        x = TimeDistributed(Dense(self.hidden_size, activation='relu'))(x)
+        x = TimeDistributed(Dense(self.nphonemes, activation='softmax'))(x)
+        modelGRU=Model(inputs=input_data, outputs=x)
+        opt=optimizers.Adam(lr=self.lr)
         modelGRU.compile(optimizer=opt, loss='categorical_crossentropy', metrics=['categorical_accuracy'])
         return modelGRU
 
@@ -129,27 +130,26 @@ class Phonet:
     def model(self, input_size):
         """This is the architecture used for the estimation of the phonological classes using a multitask learning strategy
         It consists of a 2 Bidirectional GRU layers, followed by a time-distributed dense layer
-
         :param input_size: size of input for the BGRU layers (number of features x sequence length).
         :returns: A Keras model of a 2-layer BGRU neural network.
         """
-        input_data=keras.layers.Input(shape=(input_size))
+        input_data=Input(shape=(input_size))
         x=input_data
-        x=keras.layers.BatchNormalization()(x)
-        x=keras.layers.Bidirectional(keras.layers.GRU(self.GRU_size, recurrent_dropout=self.recurrent_droput_prob, return_sequences=True, reset_after=False))(x)
-        x=keras.layers.Bidirectional(keras.layers.GRU(self.GRU_size, recurrent_dropout=self.recurrent_droput_prob, return_sequences=True, reset_after=False))(x)
-        x=keras.layers.Dropout(0.2)(x)
-        x = keras.layers.TimeDistributed(keras.layers.Dense(self.hidden_size, activation='relu'))(x)
-        x=keras.layers.Dropout(0.2)(x)
+        x=BatchNormalization()(x)
+        x=Bidirectional(GRU(self.GRU_size, recurrent_dropout=self.recurrent_droput_prob, return_sequences=True, reset_after=False))(x)
+        x=Bidirectional(GRU(self.GRU_size, recurrent_dropout=self.recurrent_droput_prob, return_sequences=True, reset_after=False))(x)
+        x=Dropout(0.2)(x)
+        x = TimeDistributed(Dense(self.hidden_size, activation='relu'))(x)
+        x=Dropout(0.2)(x)
             # multi-task
         xout=[]
         out=[]
         for j in range(len(self.names)):
-            xout.append(keras.layers.TimeDistributed(keras.layers.Dense(self.hidden_size, activation='relu'))(x))
-            out.append(keras.layers.TimeDistributed(keras.layers.Dense(2, activation='softmax'), name=self.names[j])(xout[-1]))
+            xout.append(TimeDistributed(Dense(self.hidden_size, activation='relu'))(x))
+            out.append(TimeDistributed(Dense(2, activation='softmax'), name=self.names[j])(xout[-1]))
 
-        modelGRU=keras.Model(inputs=input_data, outputs=out)
-        opt=keras.optimizers.Adam(learning_rate=self.lr)
+        modelGRU=Model(inputs=input_data, outputs=out)
+        opt=optimizers.Adam(lr=self.lr)
         alphas=list(np.ones(len(self.names))/len(self.names))
         modelGRU.compile(optimizer=opt, loss='categorical_crossentropy', metrics=['categorical_accuracy'], sample_weight_mode="temporal", loss_weights=alphas)
         return modelGRU
@@ -158,7 +158,6 @@ class Phonet:
         """
         This method extracts log-Mel-filterbank energies used as inputs
         of the model.
-
         :param signal: the audio signal from which to compute features. Should be an N array.
         :param fs: the sample rate of the signal we are working with, in Hz.
         :returns: A numpy array of size (NUMFRAMES by 33 log-Mel-filterbank energies) containing features. Each row holds 1 feature vector.
@@ -179,7 +178,6 @@ class Phonet:
     def number2phoneme(self, seq):
         """
         Converts the prediction of the neural network for phoneme recognition to a list of phonemes.
-
         :param seq: sequence of integers obtained from the preiction of the neural network for phoneme recognition.
         :returns: A list of strings of the phonemes recognized for each time-frame.
         """
@@ -196,10 +194,9 @@ class Phonet:
             return np.nan
 
 
-    def get_phon_wav(self, audio_file, feat_file="", plot_flag=True):
+    def get_phon_wav(self, audio_file, feat_file="",name_plot="", plot_flag=True):
         """
         Estimate the phonological classes using the BGRU models for an audio file (.wav)
-
         :param audio_file: file audio (.wav) sampled at 16 kHz
         :param feat_file: . File (.csv) to save the posteriors for the phonological classes. Deafult="" does not save the csv file
         :param plot_flag: True or False, whether you want plots of phonological classes or not
@@ -210,23 +207,21 @@ class Phonet:
         >>> file_audio=PATH+"/audios/pataka.wav"
         >>> file_feat=PATH+"/phonclasses/pataka"
         >>> phon.get_phon_wav(file_audio, file_feat, True)
-
         >>> file_audio=PATH+"/audios/sentence.wav"
         >>> file_feat=PATH+"/phonclasses/sentence_nasal"
         >>> phon=Phonet(["nasal"]) # get the "nasal" phonological posterior from a single file
         >>> phon.get_phon_wav(file_audio, file_feat, True)
-
         >>> file_audio=PATH+"/audios/sentence.wav"
         >>> file_feat=PATH+"/phonclasses/sentence_nasal"
         >>> phon=Phonet(["strident", "nasal", "back"]) # get "strident, nasal, and back" phonological posterior from a single file
         >>> phon.get_phon_wav(file_audio, file_feat, True)
-
         """
         if audio_file.find('.wav')==-1 and audio_file.find('.WAV')==-1:
             raise ValueError(audio_file+" is not a valid audio file")
 
         fs, signal=read(audio_file)
         if fs!=16000:
+            #raise ValueError(str(fs)+" is not a valid sampling frequency")
             signal=resample_poly(signal, 16000, fs)
             fs=16000
         feat=self.get_feat(signal,fs)
@@ -274,45 +269,65 @@ class Phonet:
             dfa[problem]=self.mask_correction(post)
         
         if plot_flag:
-            self.plot_phonological(feat_file, fs, signal, dfa, phonemes_list, t2)
-
-        dfa=pd.DataFrame(dfa)
-        if len(feat_file)>0:
-            dfa.to_csv(feat_file, index=False)
-        gc.collect()
-        return dfa
-
-    def plot_phonological(self, feat_file, fs, signal, dfa, phonemes_list, t2):
-        n_plots=int(np.ceil(len(self.keys_val)/4))
-        figsize=(6,int(n_plots*3))
-        colors = cm.get_cmap('Accent', 5)
-        col_order=[0,1,2,3]*n_plots
-        plt.figure(figsize=figsize)
+            n_plots=int(np.ceil(len(self.keys_val)/4))
+            figsize=(18,int(n_plots*6))
+            colors = cm.get_cmap('Accent', 5)
+            col_order=[0,1,2,3]*n_plots
+            fig1, ax1 = plt.subplots(figsize=figsize)
         for l, problem in enumerate(self.keys_val):
 
-            if (l==0) or (l==4) or (l==8) or (l==12) or (l==16):
-                subp=int(l/4+1)
-                plt.subplot(n_plots,1, subp)
-                t=np.arange(len(signal))/fs
-                signal=signal-np.mean(signal)
-                plt.plot(t,signal/np.max(np.abs(signal)), color=colors.colors[4], alpha=0.5)
-                plt.grid()
+            df[problem]=dfa[problem]
 
-            plt.plot(t2,dfa[problem],  color=colors.colors[col_order[l]], label=problem, linewidth=2)
-            ini=t2[0]
-            for nu in range(1,len(phonemes_list)):
-                if phonemes_list[nu]!=phonemes_list[nu-1] or nu==len(phonemes_list)-1:
-                    difft=t2[nu]-ini
-                    plt.text(x=ini+difft/2, y=1, s=phonemes_list[nu-1], color="k", fontsize=10)
-                    ini=t2[nu]
+            if plot_flag:
+                
+                if (l==0) or (l==4) or (l==8) or (l==12) or (l==16):
+                    t=np.arange(len(signal))/fs
+                    signal=signal-np.mean(signal)
+                    ax1.plot(t,signal/np.max(np.abs(signal)), color=colors.colors[4], alpha=0.5)
+                    ax1.grid()
 
-            plt.xlabel("Time (s)")
-            plt.ylabel("Phonological posteriors")
-            plt.legend(loc=8, ncol=2)
+                ax1.plot(t2,df[problem],  color=colors.colors[col_order[l]], label=problem, linewidth=2)
+                
+                fig2, ax2 = plt.subplots(figsize=figsize)
+                ax2.plot(t,signal/np.max(np.abs(signal)), color=colors.colors[4], alpha=0.5)
+                ax2.grid()
+                ax2.plot(t2,df[problem],  color=colors.colors[col_order[l]], label=problem, linewidth=2)
+                ax2.set_xlabel("Tiempo (s)", fontsize=22)
+                ax2.set_ylabel("Posteriores fonológicos", fontsize=22)
+                ax2.legend(loc=8, ncol=2,fontsize=22)
+                ax2.xaxis.set_tick_params(labelsize=15)
+                ax2.yaxis.set_tick_params(labelsize=15)
+                fig2.tight_layout()
 
-        plt.tight_layout()
-        plt.savefig(feat_file+"post.png")
-        plt.show()
+            
+                ini=t2[0]
+                for nu in range(1,len(phonemes_list)):
+                    if phonemes_list[nu]!=phonemes_list[nu-1] or nu==len(phonemes_list)-1:
+                        
+                        difft=t2[nu]-ini
+                        if (phonemes_list[nu-1] in self.Phon.list_phonological[problem]):
+                            ax2.text(x=ini+difft/2, y=1, s=phonemes_list[nu-1], color="k", fontsize=15)
+                        ini=t2[nu]
+                name_problem = problem+'.png'
+                fig2.savefig(os.path.join(name_plot,name_problem))
+                
+                ax1.set_xlabel("Tiempo (s)", fontsize=22)
+                ax1.set_ylabel("Posteriores fonológicos", fontsize=22)
+                ax1.xaxis.set_tick_params(labelsize=15)
+                ax1.yaxis.set_tick_params(labelsize=15)
+                ax1.legend(loc=8, ncol=2,fontsize=22)
+
+        if plot_flag:
+            fig1.tight_layout()
+            fig1.savefig(os.path.join(name_plot,'full.png'))
+          
+        
+
+        df2=pd.DataFrame(df)
+        if len(feat_file)>0:
+            df2.to_csv(feat_file)
+        gc.collect()
+        return df2
 
 
 
@@ -320,12 +335,10 @@ class Phonet:
     def get_phon_path(self, audio_path, feat_path, plot_flag=False):
         """
         Estimate the phonological classes using the BGRU models for all the (.wav) audio files included inside a directory
-
         :param audio_path: directory with (.wav) audio files inside, sampled at 16 kHz
         :param feat_path: directory were the computed phonological posteriros will be stores as a (.csv) file per (.wav) file from the input directory
         :param plot_flag: True or False, whether you want plots of phonological classes or not
         :returns: A directory with csv files created with the posterior probabilities for the phonological classes.
-
         >>> from phonet.phonet import Phonet
         >>> phon=Phonet(["vocalic", "strident", "nasal", "back", "stop", "pause"])
         >>> phon.get_phon_path(PATH+"/audios/", PATH+"/phonclasses2/")
@@ -352,10 +365,8 @@ class Phonet:
     def get_posteriorgram(self, audio_file):
         """
         Estimate the posteriorgram for an audio file (.wav) sampled at 16kHz
-
         :param audio_file: file audio (.wav) sampled at 16 kHz
         :returns: plot of the posteriorgram
-
         >>> from phonet.phonet import Phonet
         >>> phon=Phonet(["vocalic", "strident", "nasal", "back", "stop", "pause"])
         >>> phon.get_posteriorgram(file_audio)
@@ -420,16 +431,12 @@ class Phonet:
         :projected: whether to make a projection of the feature space of the PLLR according to [1], in order to avoid the bounding effect.
         :plot_flag: True or False. Plot distributions of the feature space
         :returns: Pandas dataFrame with the PLLR features
-
         >>> from phonet.phonet import Phonet
         >>> phon=Phonet(["all"])
         >>> file_audio=PATH+"/audios/sentence.wav"
         >>> phon.get_PLLR(file_audio)
-
         References:
-
         [1] Diez, M., Varona, A., Penagarikano, M., Rodriguez-Fuentes, L. J., & Bordel, G. (2014). On the projection of PLLRs for unbounded feature distributions in spoken language recognition. IEEE Signal Processing Letters, 21(9), 1073-1077.
-
         [2] Abad, A., Ribeiro, E., Kepler, F., Astudillo, R. F., & Trancoso, I. (2016). Exploiting Phone Log-Likelihood Ratio Features for the Detection of the Native Language of Non-Native English Speakers. In INTERSPEECH (pp. 2413-2417).
         """
 
@@ -450,11 +457,63 @@ class Phonet:
             P=I-Ones.T*Ones
             PLLRp=np.matmul(PLLR,P)
 
+            if plot_flag:
+                figsize=(10,3)
+                
+                fig=plt.figure(figsize=figsize)
+                
+                ax = fig.add_subplot(131, projection='3d')
+                indexes=np.random.randint(0,PLLR.shape[1], 3)
+                ax.scatter(post[:,indexes[0]],post[:,indexes[1]], post[:,indexes[2]], c='b', alpha=0.2, s=20)
+                ax.set_xlabel(self.keys_val[indexes[0]])
+                ax.set_ylabel(self.keys_val[indexes[1]])
+                ax.set_zlabel(self.keys_val[indexes[2]])
+                plt.title("Posteriors")
+                ax = fig.add_subplot(132, projection='3d')
+                ax.scatter(PLLR[:,indexes[0]],PLLR[:,indexes[1]],PLLR[:,indexes[2]], c='b', alpha=0.2, s=20)
+                ax.set_xlabel(self.keys_val[indexes[0]])
+                ax.set_ylabel(self.keys_val[indexes[1]])
+                ax.set_zlabel(self.keys_val[indexes[2]])
+                plt.title("PLLR")
+                ax = fig.add_subplot(133, projection='3d')
+                ax.scatter(PLLRp[:,indexes[0]],PLLRp[:,indexes[1]],PLLRp[:,indexes[2]], c='b', alpha=0.2, s=20)
+                ax.set_xlabel(self.keys_val[indexes[0]])
+                ax.set_ylabel(self.keys_val[indexes[1]])
+                ax.set_zlabel(self.keys_val[indexes[2]])
+                plt.title("Projected PLLR")
+                plt.tight_layout()
+        
         for l, problem in enumerate(self.keys_val):
             if projected:
                 dfPLLR[problem]=PLLRp[:,l]
             else:
                 dfPLLR[problem]=PLLR[:,l]
+
+        if plot_flag:
+            ncols=2
+            nrows=int(np.ceil(len(self.keys_val)/4))
+            figsize=(6,int(nrows*4))
+            colors = cm.get_cmap('Accent', 4)
+            colorsn=[0,1,2,3]*len(self.keys_val)
+            plt.figure(figsize=figsize)
+            for l, problem in enumerate(self.keys_val):
+
+                if (l==0) or (l==4) or (l==8) or (l==12) or (l==16):
+                    subp1=int(2*l/4+1)
+                    subp2=int(2*l/4+2)
+                plt.subplot(nrows,ncols, subp1)
+                plt.hist(df[problem], color=colors.colors[colorsn[l]], label=problem, alpha=0.5)
+                if l==len(self.keys_val)-1:
+                    plt.xlabel("Phonological posteriors")
+                plt.subplot(nrows,ncols, subp2)
+                plt.hist(dfPLLR[problem], color=colors.colors[colorsn[l]], label=problem, alpha=0.5)
+                if l==len(self.keys_val)-1:
+                    plt.xlabel("PLLR")
+                plt.legend()
+                plt.tight_layout()
+                plt.grid()
+            plt.show()
+
         dfPLLR=pd.DataFrame(dfPLLR)
         if len(feat_file)>0:
             dfPLLR.to_csv(feat_file)
