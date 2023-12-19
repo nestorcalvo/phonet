@@ -29,14 +29,15 @@ def health():
 def plot_audio_figure(item: Item):
     try:
         subject_path = os.path.join(GENERAL_PATH, item.id)
-        sesion_path = os.path.join(subject_path, item.sesion)
+        sesion_name = 'S'+ str(item.sesion)
+        sesion_path = os.path.join(subject_path, sesion_name)
         #print(subject_path)
         feature_name = str(item.id) + '.csv'
         #print(feature_name)
         feature_storage_path = os.path.join(sesion_path, feature_name)
         image_storage_path = os.path.join(sesion_path, 'images')
         #print(feature_storage_path)
-        #os.makedirs(subject_path, exist_ok=True)
+        os.makedirs(image_storage_path, exist_ok=True)
         graph_creator = Graph(item.path, feature_storage_path, image_storage_path)
         graph_success = graph_creator.plot_store_graph()
         if graph_success == False:
