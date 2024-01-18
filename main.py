@@ -28,7 +28,7 @@ def health():
     return "Ok"
 
 
-@app.get("/audio_process")
+@app.post("/audio_process")
 def plot_audio_figure(path: str = Form(), id: str = Form(), sesion: str = Form()):
     try:
         subject_path = os.path.join(GENERAL_PATH, id)
