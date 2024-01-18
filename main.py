@@ -9,7 +9,7 @@ from phonet.graph import Graph
 
 app = FastAPI()
 
-GENERAL_PATH = '/home/nestor/Documents/Maestria/Pronunciation/phonet/prueba'
+GENERAL_PATH = '/efs/pronunciation_data'
 
 
 class Item(BaseModel):
