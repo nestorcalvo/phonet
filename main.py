@@ -4,7 +4,7 @@ from typing import Union
 
 from fastapi import FastAPI, HTTPException, Form
 from pydantic import BaseModel
-
+import subprocess
 from phonet.graph import Graph
 
 app = FastAPI()
@@ -41,6 +41,11 @@ def plot_audio_figure(path: str = Form(), id: str = Form(), sesion: str = Form()
         image_storage_path = os.path.join(sesion_path, 'images')
         # print(feature_storage_path)
         os.makedirs(image_storage_path, exist_ok=True)
+        if (".webm" in path):
+            new_path = path.replace(".webm",".wav")
+            command = ['ffmpeg', '-i', path, new_path]
+            subprocess.run(command,stdout=subprocess.PIPE,stdin=subprocess.PIPE)
+            path = new_path
         graph_creator = Graph(
             path, feature_storage_path, image_storage_path)
         graph_success = graph_creator.plot_store_graph()
